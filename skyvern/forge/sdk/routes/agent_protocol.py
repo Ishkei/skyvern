@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from functools import partial
-from typing import Annotated, Any
+from typing import Annotated, Any, Optional
 
 import structlog
 import yaml
@@ -2009,6 +2009,20 @@ async def _flatten_workflow_run_timeline(organization_id: str, workflow_run_id: 
     return final_workflow_run_block_timeline
 
 
+async def get_optional_current_user_id(
+    authorization: Annotated[str | None, Header(include_in_schema=False)] = None,
+) -> Optional[str]:
+    """
+    Get current user ID if authorization is provided, otherwise return None.
+    This makes user authentication optional for endpoints that can work with just API key.
+    """
+    if not authorization:
+        return None
+    try:
+        return await org_auth_service.get_current_user_id(authorization=authorization)
+    except HTTPException:
+        return None
+
 @base_router.get(
     "/debug-session/{workflow_permanent_id}",
     include_in_schema=False,
@@ -2016,7 +2030,7 @@ async def _flatten_workflow_run_timeline(organization_id: str, workflow_run_id: 
 async def get_or_create_debug_session_by_user_and_workflow_permanent_id(
     workflow_permanent_id: str,
     current_org: Organization = Depends(org_auth_service.get_current_org),
-    current_user_id: str = Depends(org_auth_service.get_current_user_id),
+    current_user_id: Optional[str] = Depends(get_optional_current_user_id),
 ) -> DebugSession:
     """
     `current_user_id` is a unique identifier for a user, but does not map to an
@@ -2030,9 +2044,12 @@ async def get_or_create_debug_session_by_user_and_workflow_permanent_id(
     session. The browser_session that could not be renewed will be closed.
     """
 
+    # If no user_id is provided (API key only), use organization_id as fallback
+    effective_user_id = current_user_id if current_user_id else f"org_{current_org.organization_id}"
+
     debug_session = await app.DATABASE.get_debug_session(
         organization_id=current_org.organization_id,
-        user_id=current_user_id,
+        user_id=effective_user_id,
         workflow_permanent_id=workflow_permanent_id,
     )
 
@@ -2040,14 +2057,14 @@ async def get_or_create_debug_session_by_user_and_workflow_permanent_id(
         LOG.info(
             "Existing debug session not found, created a new one, along with a new browser session",
             organization_id=current_org.organization_id,
-            user_id=current_user_id,
+            user_id=effective_user_id,
             workflow_permanent_id=workflow_permanent_id,
         )
 
         return await new_debug_session(
             workflow_permanent_id,
             current_org,
-            current_user_id,
+            effective_user_id,
         )
 
     LOG.info(
@@ -2055,7 +2072,7 @@ async def get_or_create_debug_session_by_user_and_workflow_permanent_id(
         debug_session_id=debug_session.debug_session_id,
         browser_session_id=debug_session.browser_session_id,
         organization_id=current_org.organization_id,
-        user_id=current_user_id,
+        user_id=effective_user_id,
         workflow_permanent_id=workflow_permanent_id,
     )
 
@@ -2073,13 +2090,13 @@ async def get_or_create_debug_session_by_user_and_workflow_permanent_id(
             browser_session_id=debug_session.browser_session_id,
             organization_id=current_org.organization_id,
             workflow_permanent_id=workflow_permanent_id,
-            user_id=current_user_id,
+            user_id=effective_user_id,
         )
 
         return await new_debug_session(
             workflow_permanent_id,
             current_org,
-            current_user_id,
+            effective_user_id,
         )
 
 
@@ -2090,7 +2107,7 @@ async def get_or_create_debug_session_by_user_and_workflow_permanent_id(
 async def new_debug_session(
     workflow_permanent_id: str,
     current_org: Organization = Depends(org_auth_service.get_current_org),
-    current_user_id: str = Depends(org_auth_service.get_current_user_id),
+    current_user_id: str = Depends(get_optional_current_user_id),
 ) -> DebugSession:
     """
     Create a new debug session, along with a new browser session. If any
@@ -2104,10 +2121,13 @@ async def new_debug_session(
     spamming.
     """
 
+    # If no user_id is provided (API key only), use organization_id as fallback
+    effective_user_id = current_user_id if current_user_id else f"org_{current_org.organization_id}"
+
     if current_user_id:
         debug_session = await app.DATABASE.get_latest_debug_session_for_user(
             organization_id=current_org.organization_id,
-            user_id=current_user_id,
+            user_id=effective_user_id,
             workflow_permanent_id=workflow_permanent_id,
         )
 
@@ -2124,14 +2144,14 @@ async def new_debug_session(
                     debug_session_id=debug_session.debug_session_id,
                     browser_session_id=debug_session.browser_session_id,
                     organization_id=current_org.organization_id,
-                    user_id=current_user_id,
+                    user_id=effective_user_id,
                     workflow_permanent_id=workflow_permanent_id,
                 )
                 return debug_session
 
     completed_debug_sessions = await app.DATABASE.complete_debug_sessions(
         organization_id=current_org.organization_id,
-        user_id=current_user_id,
+        user_id=effective_user_id,
         workflow_permanent_id=workflow_permanent_id,
     )
 
@@ -2139,7 +2159,7 @@ async def new_debug_session(
         f"Completed {len(completed_debug_sessions)} pre-existing debug session(s)",
         num_completed_debug_sessions=len(completed_debug_sessions),
         organization_id=current_org.organization_id,
-        user_id=current_user_id,
+        user_id=effective_user_id,
         workflow_permanent_id=workflow_permanent_id,
     )
 
@@ -2161,7 +2181,7 @@ async def new_debug_session(
         LOG.info(
             f"Closing browser {len(closeable_browser_sessions)} browser session(s)",
             organization_id=current_org.organization_id,
-            user_id=current_user_id,
+            user_id=effective_user_id,
             workflow_permanent_id=workflow_permanent_id,
         )
 
@@ -2210,7 +2230,7 @@ async def new_debug_session(
     debug_session = await app.DATABASE.create_debug_session(
         browser_session_id=new_browser_session.persistent_browser_session_id,
         organization_id=current_org.organization_id,
-        user_id=current_user_id,
+        user_id=effective_user_id,
         workflow_permanent_id=workflow_permanent_id,
     )
 
@@ -2219,7 +2239,7 @@ async def new_debug_session(
         debug_session_id=debug_session.debug_session_id,
         browser_session_id=new_browser_session.persistent_browser_session_id,
         organization_id=current_org.organization_id,
-        user_id=current_user_id,
+        user_id=effective_user_id,
         workflow_permanent_id=workflow_permanent_id,
     )
 
