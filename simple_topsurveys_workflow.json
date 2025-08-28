@@ -1,0 +1,54 @@
+{
+  "title": "Simple TopSurveys Workflow",
+  "description": "Basic TopSurveys automation workflow",
+  "parameters": [
+    {
+      "key": "survey_username",
+      "description": "TopSurveys username",
+      "default_value": ""
+    },
+    {
+      "key": "survey_password",
+      "description": "TopSurveys password",
+      "default_value": ""
+    }
+  ],
+  "blocks": [
+    {
+      "block_type": "navigation",
+      "name": "navigate_to_topsurveys",
+      "label": "Navigate to TopSurveys",
+      "description": "Navigate to TopSurveys main page",
+      "data": {
+        "navigation_goal": "Go to TopSurveys website",
+        "url": "https://app.topsurveys.app/Surveys",
+        "complete_criterion": "Page loads successfully",
+        "terminate_criterion": "Page fails to load"
+      }
+    },
+    {
+      "block_type": "login",
+      "name": "login_to_topsurveys",
+      "label": "Login to TopSurveys",
+      "description": "Login with credentials",
+      "data": {
+        "navigation_goal": "Login to TopSurveys account",
+        "username": "{{survey_username}}",
+        "password": "{{survey_password}}",
+        "complete_criterion": "Successfully logged in",
+        "terminate_criterion": "Login fails"
+      }
+    },
+    {
+      "block_type": "task",
+      "name": "scan_surveys",
+      "label": "Scan Available Surveys",
+      "description": "Find available surveys",
+      "data": {
+        "navigation_goal": "Look for available surveys on the page and extract basic information",
+        "complete_criterion": "Surveys are identified",
+        "terminate_criterion": "No surveys found"
+      }
+    }
+  ]
+}
